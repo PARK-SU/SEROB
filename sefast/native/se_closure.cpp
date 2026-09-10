@@ -20,17 +20,9 @@
 #include <unordered_set>
 #include <vector>
 
-#ifdef __EMSCRIPTEN__
-#include <emscripten/emscripten.h>
-#else
-#define EMSCRIPTEN_KEEPALIVE
-#endif
+#include "se_core.h"
 
 namespace sefast {
-
-constexpr int kCells = 81;
-constexpr int kPotentialIds = 1460;
-constexpr uint16_t kAll = 0x3fe;
 
 enum Cause : int8_t {
     None = -1,
@@ -64,105 +56,6 @@ struct Node {
     }
 };
 
-struct Board {
-    std::array<uint8_t, kCells> values{};
-    std::array<uint16_t, kCells> candidates{};
-
-    static Board fromPuzzle(const std::string& puzzle) {
-        if (puzzle.size() != kCells)
-            throw std::invalid_argument("puzzle must have 81 characters");
-        Board result;
-        for (int cell = 0; cell < kCells; ++cell) {
-            char ch = puzzle[cell];
-            if (ch == '.') {
-                result.candidates[cell] = kAll;
-            } else if (ch >= '1' && ch <= '9') {
-                result.values[cell] = static_cast<uint8_t>(ch - '0');
-            } else {
-                throw std::invalid_argument("invalid puzzle character");
-            }
-        }
-        for (int cell = 0; cell < kCells; ++cell) {
-            if (result.values[cell] == 0) continue;
-            int value = result.values[cell];
-            for (int peer : peers(cell))
-                result.candidates[peer] &= static_cast<uint16_t>(~(1u << value));
-            result.candidates[cell] = 0;
-        }
-        return result;
-    }
-
-    static Board fromInput(const std::string& input) {
-        if (input.size() == kCells) return fromPuzzle(input);
-        if (input.size() != 325 || input[81] != ':')
-            throw std::invalid_argument("input must be a puzzle or rating-state hex");
-        Board result;
-        for (int cell = 0; cell < kCells; ++cell) {
-            char ch = input[cell];
-            if (ch == '.') result.values[cell] = 0;
-            else if (ch >= '1' && ch <= '9')
-                result.values[cell] = static_cast<uint8_t>(ch - '0');
-            else throw std::invalid_argument("invalid state value");
-            int mask = 0;
-            for (int digit = 0; digit < 3; ++digit) {
-                char hex = input[82 + cell * 3 + digit];
-                int value = hex >= '0' && hex <= '9' ? hex - '0'
-                    : hex >= 'a' && hex <= 'f' ? hex - 'a' + 10
-                    : hex >= 'A' && hex <= 'F' ? hex - 'A' + 10 : -1;
-                if (value < 0) throw std::invalid_argument("invalid state candidate mask");
-                mask = (mask << 4) | value;
-            }
-            result.candidates[cell] = static_cast<uint16_t>(mask);
-        }
-        return result;
-    }
-
-    static const std::array<int, 20>& peers(int cell) {
-        static const auto table = [] {
-            std::array<std::array<int, 20>, kCells> result{};
-            for (int source = 0; source < kCells; ++source) {
-                std::array<bool, kCells> seen{};
-                int at = 0;
-                int row = source / 9, col = source % 9;
-                int boxRow = row / 3 * 3, boxCol = col / 3 * 3;
-                auto append = [&](int other) {
-                    if (other != source && !seen[other]) {
-                        seen[other] = true;
-                        result[source][at++] = other;
-                    }
-                };
-                for (int y = boxRow; y < boxRow + 3; ++y)
-                    for (int x = boxCol; x < boxCol + 3; ++x)
-                        append(y * 9 + x);
-                for (int x = 0; x < 9; ++x) append(row * 9 + x);
-                for (int y = 0; y < 9; ++y) append(y * 9 + col);
-            }
-            return result;
-        }();
-        return table[cell];
-    }
-};
-
-inline int potentialId(int cell, int value, bool on) {
-    return (cell * 9 + value) * 2 + (on ? 1 : 0);
-}
-
-inline int potentialCell(int id) {
-    return ((id >> 1) - 1) / 9;
-}
-
-inline int potentialValue(int id) {
-    return ((id >> 1) - 1) % 9 + 1;
-}
-
-inline bool potentialOn(int id) {
-    return (id & 1) != 0;
-}
-
-inline int bitCount(uint16_t value) {
-    return __builtin_popcount(static_cast<unsigned>(value));
-}
-
 struct RemovalHash {
     size_t operator()(const std::array<uint16_t, kCells>& removals) const {
         uint64_t hash = 1469598103934665603ull;
@@ -186,6 +79,10 @@ uint64_t diagnosticAdvancedCalls = 0;
 uint64_t diagnosticStaticCacheHits = 0;
 uint64_t diagnosticStaticCacheMisses = 0;
 uint64_t diagnosticStaticHints = 0;
+// Whole-rating counters; unlike the accelerator counters these survive each
+// producer call. They measure native work, whose cache reuse differs from Java.
+std::array<uint64_t, 8> ratingClosureCalls{};
+std::array<uint64_t, 8> ratingAdvancedCalls{};
 
 class Closure {
 public:
@@ -371,6 +268,7 @@ public:
 private:
     void execute(const std::vector<int>& initialOn,
                  const std::vector<int>& initialOff) {
+        ++ratingClosureCalls[std::min(std::max(level_, 0), 7)];
         for (int id : initialOn) addInitial(id, true);
         for (int id : initialOff) addInitial(id, false);
 
@@ -654,8 +552,9 @@ private:
         for (uint8_t value : grid_.values) if (value) ++occurrences[value];
         for (const auto& call : calls) {
             int primary = call[0], secondary = call[1];
-            for (int first = 0; first < 8; ++first) {
-                for (int second = first + 1; second < 9; ++second) {
+            // Fisherman's Permutations(2, 9) visits increasing bitmasks.
+            for (int second = 1; second < 9; ++second) {
+                for (int first = 0; first < second; ++first) {
                     for (int value = 1; value <= 9; ++value) {
                         if (occurrences[value] + 4 > 9) continue;
                         uint16_t one = positions(primary, first, value);
@@ -700,6 +599,7 @@ private:
 
     std::vector<Node> advancedPotentials() const {
         ++diagnosticAdvancedCalls;
+        ++ratingAdvancedCalls[std::min(std::max(level_, 0), 7)];
         std::vector<Node> result = lockingPotentials();
         if (!result.empty()) return result;
         result = hiddenPairPotentials();
@@ -960,6 +860,17 @@ struct StaticHint {
     int targetId = -1;
     std::vector<PathNode> path;
     std::array<uint16_t, kCells> removals{};
+    /**
+     * The cells of `removals`, in the order Java inserted them.
+     *
+     * createCycleHint fills a HashMap<Cell,BitSet> by walking cancelForw,
+     * and iterating that map is how these become Advanced potentials. The
+     * bucket is a function of the cell, but two cells can share one, and
+     * then they come out in insertion order -- which is this, not
+     * ascending cell index. Left empty by the shapes that remove from a
+     * single cell, where the two orders cannot differ.
+     */
+    std::vector<int> cellOrder;
     uint64_t signature = 0;
 };
 
@@ -1277,16 +1188,32 @@ private:
         for (const StaticHint::PathNode& node : result.path)
             chainCells[potentialCell(node.id)] = true;
         std::array<uint16_t, kCells> forward{}, backward{};
+        // cancelForw and cancelBack in the order Java builds them: down the
+        // chain from the target, and within each node over its visible cells
+        // ascending. Only the forward walk needs an order, because cancel is
+        // cancelForw retaining cancelBack, and retainAll keeps its order.
+        std::vector<std::pair<int, int>> forwardOrder;
         for (const StaticHint::PathNode& node : result.path) {
             int cell = potentialCell(node.id), value = potentialValue(node.id);
-            for (int peer : Board::peers(cell)) {
-                if (!chainCells[peer] && (board_.candidates[peer] & (1u << value))) {
-                    (potentialOn(node.id) ? forward : backward)[peer] |= 1u << value;
-                }
+            uint16_t bit = static_cast<uint16_t>(1u << value);
+            bool on = potentialOn(node.id);
+            for (int peer : visibleCells(cell)) {
+                if (chainCells[peer]) continue;
+                if (!(board_.candidates[peer] & bit)) continue;
+                if (!on) { backward[peer] |= bit; continue; }
+                if (!(forward[peer] & bit)) forwardOrder.push_back({peer, value});
+                forward[peer] |= bit;
             }
         }
         for (int cell = 0; cell < kCells; ++cell)
             result.removals[cell] = forward[cell] & backward[cell];
+        std::array<bool, kCells> ordered{};
+        for (const auto& item : forwardOrder) {
+            uint16_t bit = static_cast<uint16_t>(1u << item.second);
+            if (!(backward[item.first] & bit) || ordered[item.first]) continue;
+            ordered[item.first] = true;
+            result.cellOrder.push_back(item.first);
+        }
         result.signature = signature(result);
         return result;
     }
@@ -1545,9 +1472,13 @@ std::vector<Node> staticAdvancedPotentials(const Board& current,
         if (!useful) continue;
         std::vector<int> parents = engine.ruleParents(hint, initial);
         if (parents.empty()) continue;
-        std::vector<int> cells;
-        for (int cell = 0; cell < kCells; ++cell)
-            if (hint.removals[cell]) cells.push_back(cell);
+        // Bucket by bucket, and within a bucket in insertion order, which is
+        // cellOrder. A cycle hint is the only shape that removes from more
+        // than one cell, so the others cannot tell the two orders apart.
+        std::vector<int> cells = hint.cellOrder;
+        if (cells.empty())
+            for (int cell = 0; cell < kCells; ++cell)
+                if (hint.removals[cell]) cells.push_back(cell);
         int capacity = 16;
         while (cells.size() > static_cast<size_t>(capacity * 3 / 4)) capacity *= 2;
         std::stable_sort(cells.begin(), cells.end(), [capacity](int left, int right) {
@@ -1748,7 +1679,6 @@ private:
         for (const auto& target : targets)
             target.first->collectRuleParents(*target.second, initial_, current_,
                     rootCause, rootRegionType, hint.parents, added);
-        if (hint.parents.empty()) return;
         hint.signature = fullChainSignature(targets);
         result.push_back(std::move(hint));
     }
@@ -1774,7 +1704,6 @@ private:
         for (const auto& target : targets)
             target.first->collectRuleParents(*target.second, initial_, current_,
                     None, -1, hint.parents, added);
-        if (hint.parents.empty()) return;
         hint.signature = fullChainSignature(targets);
         result.push_back(std::move(hint));
     }
@@ -1851,6 +1780,13 @@ static std::vector<Node> emitChainAdvanced(
     std::vector<Node> result;
     std::array<bool, kPotentialIds> emitted{};
     for (const MultipleChainHint& hint : hints) {
+        // "If no parent can be found, the rule probably already exists without
+        // the chain." Java drops such a hint in the accumulator that consumes
+        // getHintList, so it has already taken part in the sort and in the
+        // dedup by removable potentials -- where it can displace a costlier
+        // hint that removes the same candidates. Dropping it any earlier lets
+        // that costlier hint through.
+        if (hint.parents.empty()) continue;
         std::vector<int> cells;
         for (int cell = 0; cell < kCells; ++cell)
             if (hint.removals[cell]) cells.push_back(cell);
@@ -1904,10 +1840,10 @@ struct BestHint {
 
 class Level0Dynamic {
 public:
-    Level0Dynamic(const Board& board, bool multiple, bool nishio, int level,
-            int nestingLimit = 0)
-        : board_(board), multiple_(multiple), nishio_(nishio), level_(level),
-          nestingLimit_(nestingLimit) {}
+    Level0Dynamic(const Board& board, bool multiple, bool dynamic, bool nishio,
+            int level, int nestingLimit = 0)
+        : board_(board), multiple_(multiple), dynamic_(dynamic),
+          nishio_(nishio), level_(level), nestingLimit_(nestingLimit) {}
 
     BestHint rate() {
         for (int cell = 0; cell < kCells; ++cell) {
@@ -1920,7 +1856,9 @@ public:
         for (int cell : cells) {
             if (cell < 0 || cell >= kCells)
                 throw std::invalid_argument("invalid chain cell");
-            rateOne(cell);
+            // The explicit-cell Java entry point bypasses the whole-producer
+            // cardinality gate, including for non-dynamic bivalue cells.
+            rateCell(cell, bitCount(board_.candidates[cell]));
         }
         return best_;
     }
@@ -1928,7 +1866,9 @@ public:
 private:
     void rateOne(int cell) {
             int cardinality = bitCount(board_.candidates[cell]);
-            if (board_.values[cell] != 0 || cardinality <= 1) return;
+            if (board_.values[cell] != 0
+                    || !(cardinality > 2 || (cardinality > 1 && dynamic_)))
+                return;
             rateCell(cell, cardinality);
     }
     struct ValueBranch {
@@ -1939,6 +1879,7 @@ private:
 
     const Board& board_;
     bool multiple_;
+    bool dynamic_;
     bool nishio_;
     int level_;
     int nestingLimit_;
@@ -1947,7 +1888,11 @@ private:
     mutable std::array<std::shared_ptr<Closure>, kPotentialIds> branchCache_{};
 
     int chainRating(int complexity) const {
-        int result = level_ > 0 ? 85 + level_ * 5 : nishio_ ? 75 : 85;
+        // Chaining.getDifficulty, and the same ladder MultipleChains::baseRating
+        // walks: the 80 is Multiple Forcing Chains, the one registered producer
+        // that is multiple without being dynamic.
+        int result = level_ > 0 ? 85 + level_ * 5
+                : nishio_ ? 75 : dynamic_ ? 85 : 80;
         int length = complexity - 2;
         int ceiling = 4;
         bool odd = false;
@@ -2002,7 +1947,7 @@ private:
 
     std::shared_ptr<Closure> branch(int sourceId) const {
         if (branchCache_[sourceId]) return branchCache_[sourceId];
-        auto result = std::make_shared<Closure>(board_, true, nishio_, level_,
+        auto result = std::make_shared<Closure>(board_, dynamic_, nishio_, level_,
                                                 &staticCache_, nestingLimit_);
         try {
             result->compute(sourceId);
@@ -2096,23 +2041,28 @@ private:
     }
 
     void rateCell(int cell, int cardinality) {
+        // Chaining.getMultipleChainsHintListForCell: doContradiction and the
+        // "off" branch it needs exist only for dynamic and nishio searches,
+        // and doDouble adds isDynamic on top of that.
+        bool contradiction = dynamic_ || nishio_;
         std::vector<ValueBranch> values;
         for (int value = 1; value <= 9; ++value) {
             if (!(board_.candidates[cell] & (1u << value))) continue;
             int onId = potentialId(cell, value, true);
             int offId = onId - 1;
-            ValueBranch entry{value, branch(onId), branch(offId)};
-            if (entry.on->contradicted())
+            ValueBranch entry{value, branch(onId),
+                              contradiction ? branch(offId) : nullptr};
+            if (contradiction && entry.on->contradicted())
                 considerContradiction(cell, onId, *entry.on);
-            if (entry.off->contradicted())
+            if (contradiction && entry.off->contradicted())
                 considerContradiction(cell, offId, *entry.off);
-            if (cardinality >= 3 && !nishio_)
+            if (cardinality >= 3 && !nishio_ && dynamic_)
                 reductions(cell, *entry.on, *entry.off);
             if (!nishio_)
                 regionReductions(cell, value, *entry.on);
             values.push_back(std::move(entry));
         }
-        if (nishio_ || (cardinality > 2 && !multiple_)) return;
+        if (nishio_ || !(cardinality == 2 || (multiple_ && cardinality > 2))) return;
         std::vector<const Closure*> branches;
         for (const ValueBranch& value : values) branches.push_back(value.on.get());
         for (int target : intersection(branches, true))
@@ -2198,7 +2148,7 @@ extern "C" EMSCRIPTEN_KEEPALIVE const char* sefast_best_level0(
         sefast::diagnosticStaticHints = 0;
         auto board = sefast::Board::fromInput(state == nullptr ? "" : state);
         sefast::BestHint best = sefast::Level0Dynamic(
-                board, multiple != 0, nishio != 0, level).rate();
+                board, multiple != 0, dynamic != 0, nishio != 0, level).rate();
         if (!best.found) return "";
         std::ostringstream out;
         out << best.cell << ',' << best.rating << ',' << best.complexity << ','
@@ -2215,7 +2165,10 @@ extern "C" EMSCRIPTEN_KEEPALIVE const char* sefast_best_chain(
         const char* state, int multiple, int dynamic, int nishio, int level,
         int nestingLimit) {
     static std::string result;
-    if (!dynamic || level < 0 || level > 4
+    // Chaining.getHintList sends every producer that is multiple or dynamic
+    // here; the one that is neither is a cycle search and belongs to
+    // sefast_best_static.
+    if ((!dynamic && !multiple) || level < 0 || level > 4
             || nestingLimit < 0 || nestingLimit > 3)
         return "-1";
     try {
@@ -2225,7 +2178,8 @@ extern "C" EMSCRIPTEN_KEEPALIVE const char* sefast_best_chain(
         sefast::diagnosticStaticHints = 0;
         auto board = sefast::Board::fromInput(state == nullptr ? "" : state);
         sefast::BestHint best = sefast::Level0Dynamic(
-                board, multiple != 0, nishio != 0, level, nestingLimit).rate();
+                board, multiple != 0, dynamic != 0, nishio != 0, level,
+                nestingLimit).rate();
         if (!best.found) return "";
         std::ostringstream out;
         out << best.cell << ',' << best.rating << ',' << best.complexity << ','
@@ -2242,14 +2196,16 @@ extern "C" EMSCRIPTEN_KEEPALIVE const char* sefast_best_chain_cells(
         const char* state, const char* cells, int multiple, int dynamic,
         int nishio, int level, int nestingLimit) {
     static std::string result;
-    if (!dynamic || level < 0 || level > 4
+    // Same producer family as sefast_best_chain; explicit-cell attribution
+    // and stable ties are checked independently by tools/cell-diff.
+    if ((!dynamic && !multiple) || level < 0 || level > 4
             || nestingLimit < 0 || nestingLimit > 3)
         return "-1";
     try {
         auto board = sefast::Board::fromInput(state == nullptr ? "" : state);
         sefast::BestHint best = sefast::Level0Dynamic(
-                board, multiple != 0, nishio != 0, level, nestingLimit)
-                .rateCells(parseIds(cells));
+                board, multiple != 0, dynamic != 0, nishio != 0, level,
+                nestingLimit).rateCells(parseIds(cells));
         if (!best.found) return "";
         std::ostringstream out;
         out << best.cell << ',' << best.rating << ',' << best.complexity << ','
@@ -2268,6 +2224,26 @@ extern "C" EMSCRIPTEN_KEEPALIVE const char* sefast_diagnostics() {
             + std::to_string(sefast::diagnosticStaticCacheHits) + ","
             + std::to_string(sefast::diagnosticStaticCacheMisses) + ","
             + std::to_string(sefast::diagnosticStaticHints);
+    return result.c_str();
+}
+
+extern "C" void sefast_reset_rating_diagnostics() {
+    sefast::ratingClosureCalls.fill(0);
+    sefast::ratingAdvancedCalls.fill(0);
+}
+
+extern "C" const char* sefast_rating_diagnostics() {
+    static std::string result;
+    std::ostringstream out;
+    bool first = true;
+    for (int level = 0; level < 8; ++level) {
+        if (!sefast::ratingClosureCalls[level] && !sefast::ratingAdvancedCalls[level]) continue;
+        if (!first) out << ';';
+        first = false;
+        out << level << ':' << sefast::ratingClosureCalls[level] << '/'
+            << sefast::ratingAdvancedCalls[level];
+    }
+    result = out.str();
     return result.c_str();
 }
 

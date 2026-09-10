@@ -1,0 +1,7 @@
+/build/
+/sefast/build/
+*.class
+*.o
+*.obj
+*.exe
+*.log
