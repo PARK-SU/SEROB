@@ -1,20 +1,14 @@
-# SE Rating-Only Build
+# SEROB C++ WebAssembly build
 
-SEROB is a rating-only build of the SukakuExplainer source. It keeps
-SukakuExplainer's technique order, implication parents, hint complexity, and
-hint ordering.
+From the repository root, run:
 
-## Modes
-
-- `current` / `0`: current SukakuExplainer rules
-- `se121` / `1`: Explainer 1.2.1 compatibility mode
-
-The browser API is asynchronous because difficult nested forcing chains must
-not block the UI thread:
-
-```js
-const { er, ep, ed } = await SeFast.rate(puzzle, "se121");
-const results = await SeFast.ratePuzzles(puzzles, "current");
+```powershell
+.\sefast\build-native.ps1
 ```
 
-Ratings are returned as integers in tenths (`99` means `9.9`).
+`em++` must be available on `PATH`, or its executable can be supplied with the
+`-Compiler` parameter. Output is written to `sefast/build/native`.
+
+The generated JavaScript module, WebAssembly binary, and
+`native/sefast_runtime.js` are the three runtime files required by the host
+application.
