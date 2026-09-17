@@ -123,7 +123,9 @@ bool isPuzzle(const char* puzzle) {
     if (!puzzle) return false;
     std::string input(puzzle);
     return input.size() == kCells && std::all_of(input.begin(), input.end(),
-            [](char ch) { return ch == '.' || (ch >= '1' && ch <= '9'); });
+            [](char ch) {
+                return ch == '.' || ch == '0' || (ch >= '1' && ch <= '9');
+            });
 }
 
 }  // namespace
@@ -183,7 +185,7 @@ extern "C" EMSCRIPTEN_KEEPALIVE const char* sefast_rate(const char* puzzle, int 
     static std::string result;
     try {
         if (!sefast::isPuzzle(puzzle))
-            throw std::invalid_argument("puzzle must contain 81 characters from . and 1-9");
+            throw std::invalid_argument("puzzle must contain 81 characters from ., 0 and 1-9");
         sefast::checkMode(mode);
         result = sefast::rateBoard(sefast::Board::fromPuzzle(puzzle), mode).csv();
     } catch (const std::invalid_argument& error) {

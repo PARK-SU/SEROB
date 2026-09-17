@@ -39,7 +39,7 @@ struct Board {
         Board result;
         for (int cell = 0; cell < kCells; ++cell) {
             char ch = puzzle[cell];
-            if (ch == '.') {
+            if (ch == '.' || ch == '0') {
                 result.candidates[cell] = kAll;
             } else if (ch >= '1' && ch <= '9') {
                 result.values[cell] = static_cast<uint8_t>(ch - '0');

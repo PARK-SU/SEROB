@@ -21,6 +21,9 @@ The SEROB WebAssembly and C++ adaptations were modified in 2026 by ClubDS.
   runtime adapter.
 - `sefast/build-native.ps1`: the PowerShell build script for the C++ WebAssembly
   module.
+- `unified-rating/`: a second build that links this engine together with the
+  separate skfr engine into one module, selected by mode. See
+  `unified-rating/README.md`.
 
 ## Rebuilding
 
