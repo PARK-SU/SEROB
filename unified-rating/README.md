@@ -34,6 +34,14 @@ in a module built without skfr; skfr is the mode added on the end.
 when the engine declined the puzzle. `ERROR,` prefixes a rejected input. The SE
 engine's own entry points stay exported, under `se` in the runtime adapter.
 
+`rating_rate_one_cell(puzzle, mode)`, exposed by the adapter as
+`rate(puzzle, mode, {onlyOneCell: true})`, supports SE and SE 1.2.1 only.
+The host must first prove that exactly one non-clue cell is forced across all
+solutions. This entry point disables uniqueness-based deductions and stops at
+the first placement. Display EP and ED from its response; ER is unavailable
+for this puzzle type. Mode 2 returns an unsupported error for this entry point.
+Classic ratings continue to use the unchanged skfr source and normal entry point.
+
 ## Rebuilding
 
 Requirements:
@@ -43,6 +51,7 @@ Requirements:
 - The skfr source, which is not vendored here
 
 The current output was built with Emscripten 6.0.9 and [skfr](https://github.com/dobrichev/skfr).
+The skfr source revision is `d9c587f916c5872d8445d58a7527c479460d5449`, with no patches.
 
 From the repository root, build the combined WebAssembly module with:
 

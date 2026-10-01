@@ -152,7 +152,14 @@ std::string Rating::csv() const {
 }
 
 Rating rateBoard(Board grid, int mode, bool low, char want) {
-    const auto rules = producers(mode, low);
+    auto rules = producers(mode, low);
+    // Only-one-cell puzzles have multiple completions. Uniqueness rules
+    // cannot justify a deduction, and the first placement completes the task.
+    if (want == 'o') {
+        rules.erase(std::remove_if(rules.begin(), rules.end(), [](const Producer& rule) {
+            return rule.run == sefast_best_unique_loop || rule.run == sefast_best_bug;
+        }), rules.end());
+    }
     Rating rating;
     while (std::find(grid.values.begin(), grid.values.end(), 0) != grid.values.end()) {
         SolverHint next = findHint(grid, rules);
@@ -170,6 +177,7 @@ Rating rateBoard(Board grid, int mode, bool low, char want) {
                     break;
                 }
                 rating.pearl = rating.difficulty;
+                if (want == 'o') break;
             }
         } else if (want != 0 && rating.difficulty > rating.pearl) {
             rating.difficulty = 200;
@@ -180,6 +188,21 @@ Rating rateBoard(Board grid, int mode, bool low, char want) {
 }
 
 }  // namespace sefast
+
+extern "C" EMSCRIPTEN_KEEPALIVE const char* sefast_rate_one_cell(const char* puzzle, int mode) {
+    static std::string result;
+    try {
+        if (!sefast::isPuzzle(puzzle)) throw std::invalid_argument("invalid puzzle");
+        sefast::checkMode(mode);
+        auto rating = sefast::rateBoard(sefast::Board::fromPuzzle(puzzle), mode, true, 'o');
+        if (rating.pearl == 0)
+            rating = sefast::rateBoard(sefast::Board::fromPuzzle(puzzle), mode, false, 'o');
+        result = rating.pearl == 0 ? "" : rating.csv();
+    } catch (const std::exception& error) {
+        result = std::string("ERROR,java.lang.RuntimeException,") + error.what();
+    }
+    return result.c_str();
+}
 
 extern "C" EMSCRIPTEN_KEEPALIVE const char* sefast_rate(const char* puzzle, int mode) {
     static std::string result;

@@ -42,7 +42,7 @@ foreach ($file in Get-ChildItem -LiteralPath $sefastSource -Filter '*.cpp' | Sor
 $compiled += Compile (Join-Path $ratingSource 'rating_bridge.cpp') 'rating_bridge' @("-I$SkfrSource")
 
 $exports = @(
-    '_rating_rate',
+    '_rating_rate', '_rating_rate_one_cell',
     '_sefast_rate', '_sefast_rate_diag', '_sefast_rate_low_current',
     '_sefast_closure', '_sefast_closure_packed', '_sefast_closure_length',
     '_sefast_best_level0', '_sefast_best_chain', '_sefast_best_chain_cells',

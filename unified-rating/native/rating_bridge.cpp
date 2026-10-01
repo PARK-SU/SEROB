@@ -23,6 +23,7 @@
 extern "C" {
 const char* sefast_rate(const char* puzzle, int mode);
 const char* sefast_rate_low_current(const char* puzzle);
+const char* sefast_rate_one_cell(const char* puzzle, int mode);
 }
 
 namespace {
@@ -68,6 +69,17 @@ std::string rateSeCurrent(const char* puzzle) {
 }
 
 }  // namespace
+
+extern "C" EMSCRIPTEN_KEEPALIVE const char* rating_rate_one_cell(const char* puzzle, int mode) {
+    static std::string result;
+    if (!isPuzzle(puzzle)) return "ERROR,input,invalid puzzle";
+    switch (mode) {
+        case kSe: case kSe121: result = sefast_rate_one_cell(puzzle, mode); break;
+        case kSkfr: return "ERROR,unsupported,skfr is unavailable for Only one cell puzzles";
+        default: result = "ERROR,input,invalid mode";
+    }
+    return result.c_str();
+}
 
 extern "C" EMSCRIPTEN_KEEPALIVE const char* rating_rate(const char* puzzle, int mode) {
     static std::string result;
