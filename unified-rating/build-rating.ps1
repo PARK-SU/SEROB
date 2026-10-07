@@ -18,7 +18,7 @@ $common = @('-std=c++17', '-O3', '-msimd128')
 
 # skfr predates C++11. It reaches SSE2 through <emmintrin.h>, calls memalign
 # and free without including their headers, and narrows ints inside brace
-# initializers; these four flags carry it as-is, with no edit to its source.
+# initializers; these four flags carry it as-is.
 $skfrFlags = @('-msse2', '-include', 'malloc.h', '-include', 'cstdlib', '-Wno-c++11-narrowing')
 # skfr.cpp is the command-line front end and skfrdll.cpp is a Windows DLL entry
 # point. Neither belongs in a WebAssembly module.
@@ -35,6 +35,13 @@ function Compile([string]$source, [string]$name, [string[]]$flags) {
 $compiled = @()
 foreach ($unit in $skfrUnits) {
     $compiled += Compile (Join-Path $SkfrSource "$unit.cpp") "skfr_$unit" $skfrFlags
+}
+# Only one cell puzzles can outgrow skfr's table of 320 candidates, so a second
+# copy sized for the whole grid rates those. Its own namespace keeps the two
+# layouts from sharing inline members at link time.
+$wideFlags = $skfrFlags + @('-DSKFR_MAX_CANDIDATES=729', '-Dskfr=skfr_wide')
+foreach ($unit in $skfrUnits) {
+    $compiled += Compile (Join-Path $SkfrSource "$unit.cpp") "skfr_wide_$unit" $wideFlags
 }
 foreach ($file in Get-ChildItem -LiteralPath $sefastSource -Filter '*.cpp' | Sort-Object Name) {
     $compiled += Compile $file.FullName $file.BaseName @('-DSEFAST_NO_MAIN')

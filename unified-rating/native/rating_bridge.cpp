@@ -26,6 +26,11 @@ const char* sefast_rate_low_current(const char* puzzle);
 const char* sefast_rate_one_cell(const char* puzzle, int mode);
 }
 
+// The same skfr sources built for 729 candidates; see build-rating.ps1.
+namespace skfr_wide {
+int ratePuzzleOneCellC(char* ze, int* er, int* ep, int* ed, int* aig);
+}
+
 namespace {
 
 // 0 and 1 carry the same meaning they have in sefast_rate, so a module built
@@ -44,21 +49,30 @@ bool isPuzzle(const char* puzzle) {
     return true;
 }
 
+using SkfrRate = int (*)(char*, int*, int*, int*, int*);
+
 /*
  * skfr reads a mutable, NUL-terminated board that spells empty cells '0', and
  * declines a puzzle it could not rate by reporting ER 0. An empty reply is how
  * this module says "not rated", so that case crosses unchanged.
  */
-std::string rateSkfr(const char* puzzle) {
+std::string rateSkfr(const char* puzzle, SkfrRate rate = skfr::ratePuzzleC) {
     char board[82];
     for (int cell = 0; cell < 81; ++cell)
         board[cell] = puzzle[cell] == '.' ? '0' : puzzle[cell];
     board[81] = '\0';
 
     int er = 0, ep = 0, ed = 0, stopped = 0;
-    skfr::ratePuzzleC(board, &er, &ep, &ed, &stopped);
+    rate(board, &er, &ep, &ed, &stopped);
     if (er == 0) return std::string();
     return std::to_string(er) + ',' + std::to_string(ep) + ',' + std::to_string(ed);
+}
+
+/* Sparse puzzles can outgrow the regular copy's table of 320 candidates. */
+std::string rateSkfrOneCell(const char* puzzle) {
+    std::string rating = rateSkfr(puzzle, skfr::ratePuzzleOneCellC);
+    if (rating.empty()) rating = rateSkfr(puzzle, skfr_wide::ratePuzzleOneCellC);
+    return rating;
 }
 
 /* The low-rule pass answers most puzzles without paying for the chain rules. */
@@ -75,7 +89,7 @@ extern "C" EMSCRIPTEN_KEEPALIVE const char* rating_rate_one_cell(const char* puz
     if (!isPuzzle(puzzle)) return "ERROR,input,invalid puzzle";
     switch (mode) {
         case kSe: case kSe121: result = sefast_rate_one_cell(puzzle, mode); break;
-        case kSkfr: return "ERROR,unsupported,skfr is unavailable for Only one cell puzzles";
+        case kSkfr: result = rateSkfrOneCell(puzzle); break;
         default: result = "ERROR,input,invalid mode";
     }
     return result.c_str();

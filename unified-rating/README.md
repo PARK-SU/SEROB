@@ -1,81 +1,46 @@
 # Combined rating module
 
-This directory contains the source that links the SEROB engine together with
-the separate skfr engine into one WebAssembly module, selected by mode.
+Links SEROB (SE) and skfr into one WebAssembly module.
 
 ## License
 
-This module combines skfr (BSD-3-Clause) with an SE-derived engine
-(LGPL-2.1-only). Distribution of the combined module must comply with
-LGPL-2.1 section 6 and retain the skfr BSD notices.
+SE is LGPL-2.1-only (root `LICENSE`). skfr is BSD-3-Clause; its changes are in
+`skfr.patch`.
 
-The corresponding source and build material are provided in `sefast/native/`,
-this directory, and the pinned skfr source identified below. The LGPL-2.1
-license text is available in the repository root `LICENSE`.
+## API
 
-## Contents
+| Mode | Engine   |
+| ---- | -------- |
+| 0    | SE       |
+| 1    | SE 1.2.1 |
+| 2    | skfr     |
 
-- `native/rating_bridge.cpp`: the entry point that selects between the engines.
-- `native/rating_runtime.js`: the JavaScript runtime adapter.
-- `build-rating.ps1`: the PowerShell build script for the combined module.
+- `rating_rate(puzzle, mode)` returns `"er,ep,ed"` in tenths, `""` when the
+  engine declines, or `ERROR,...`.
+- `rating_rate_one_cell(puzzle, mode)` rates Only one cell puzzles: several
+  solutions allowed, no uniqueness rules, stops at the first placement. Use EP
+  and ED only. Puzzles that overflow skfr's 320 candidates go to a second skfr
+  copy built for 729.
 
-## Modes
+`puzzle` is 81 characters; `.` and `0` are empty cells.
 
-| Mode | Engine            |
-| ---- | ----------------- |
-| 0    | SE, current rules |
-| 1    | SE 1.2.1          |
-| 2    | skfr              |
+## Build
 
-0 and 1 are the numbers `sefast_rate` already uses, so they mean the same thing
-in a module built without skfr; skfr is the mode added on the end.
-
-`rating_rate(puzzle, mode)` answers `"er,ep,ed"` in tenths, or an empty string
-when the engine declined the puzzle. `ERROR,` prefixes a rejected input. The SE
-engine's own entry points stay exported, under `se` in the runtime adapter.
-
-`rating_rate_one_cell(puzzle, mode)`, exposed by the adapter as
-`rate(puzzle, mode, {onlyOneCell: true})`, supports SE and SE 1.2.1 only.
-The host must first prove that exactly one non-clue cell is forced across all
-solutions. This entry point disables uniqueness-based deductions and stops at
-the first placement. Display EP and ED from its response; ER is unavailable
-for this puzzle type. Mode 2 returns an unsupported error for this entry point.
-Classic ratings continue to use the unchanged skfr source and normal entry point.
-
-## Rebuilding
-
-Requirements:
-
-- PowerShell
-- Emscripten with `em++` on `PATH`
-- The skfr source, which is not vendored here
-
-The current output was built with Emscripten 6.0.9 and [skfr](https://github.com/dobrichev/skfr).
-The skfr source revision is `d9c587f916c5872d8445d58a7527c479460d5449`, with no patches.
-
-From the repository root, build the combined WebAssembly module with:
+Requires PowerShell, Emscripten 6.0.9 and [skfr](https://github.com/dobrichev/skfr)
+at `d9c587f` with `skfr.patch` applied (`git apply`).
 
 ```powershell
-.\unified-rating\build-rating.ps1
+.\unified-rating\build-rating.ps1 [-SkfrSource ..\skfr\src] [-Compiler em++]
 ```
 
-Pass `-SkfrSource` to point at skfr's `src` directory, which defaults to a
-sibling checkout at `../skfr/src`, and `-Compiler` to use a compiler that is not
-on `PATH`. skfr predates C++11 and is compiled with four extra flags rather than
-edited; `build-rating.ps1` records which and why.
-
-This writes the three runtime files under `./unified-rating/build/native`:
-
-- `rating.js`
-- `rating.wasm`
-- `rating_runtime.js`
+Writes `rating.js`, `rating.wasm` and `rating_runtime.js` to `unified-rating/build/native`.
 
 ## Usage
 
 Put the generated files and this worker in the same public directory:
 
 ```text
-unified-rating/
+rating/
   rating.js
   rating.wasm
   rating_runtime.js
@@ -100,11 +65,11 @@ function loadEngine() {
 }
 
 self.onmessage = async ({ data }) => {
-  const { id, puzzle, mode = 0 } = data;
+  const { id, puzzle, mode = 0, onlyOneCell = false } = data;
 
   try {
     const engine = await loadEngine();
-    const raw = engine.rate(puzzle, mode);
+    const raw = engine.rate(puzzle, mode, { onlyOneCell });
     if (raw.startsWith("ERROR,")) throw new Error(raw);
 
     const [er = null, ep = null, ed = null] = raw
@@ -117,6 +82,28 @@ self.onmessage = async ({ data }) => {
 };
 ```
 
-`puzzle` must contain 81 characters from `.`, `0` and `1`-`9`; both `.` and `0`
-spell an empty cell. Give each mode its own worker: an SE rating can run for
-minutes on a hard puzzle while skfr answers in milliseconds.
+Call it from the page:
+
+```js
+const worker = new Worker("/rating/rating_worker.js");
+let requestId = 0;
+
+function rate(puzzle, mode = 0, onlyOneCell = false) {
+  const id = ++requestId;
+
+  return new Promise((resolve, reject) => {
+    const receive = ({ data }) => {
+      if (data.id !== id) return;
+      worker.removeEventListener("message", receive);
+      if (data.error) reject(new Error(data.error));
+      else resolve(data.result);
+    };
+
+    worker.addEventListener("message", receive);
+    worker.postMessage({ id, puzzle, mode, onlyOneCell });
+  });
+}
+
+const result = await rate(puzzle, 2);
+// result: { er, ep, ed }, each null when the engine declined
+```

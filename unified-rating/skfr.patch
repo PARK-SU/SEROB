@@ -1,0 +1,836 @@
+diff --git a/src/bitfields.cpp b/src/bitfields.cpp
+index f2feff1..b4b01a0 100644
+--- a/src/bitfields.cpp
++++ b/src/bitfields.cpp
+@@ -34,21 +34,21 @@ namespace skfr {
+ 
+ //-----
+ void BFTAG::SetAll_0() {
+-	for(int i = 0; i < 5; i++)
++	for(int i = 0; i < SKFR_TAG_WORDS; i++)
+ 		ff[i].clear();
+ }
+ void BFTAG::SetAll_1() {
+-	for(int i = 0; i < 5; i++)
++	for(int i = 0; i < SKFR_TAG_WORDS; i++)
+ 		ff[i] = maskffff;
+ }
+ bool BFTAG::IsNotEmpty() const {
+-	for(int i = 0; i < 5; i++)
++	for(int i = 0; i < SKFR_TAG_WORDS; i++)
+ 		if(!ff[i].isZero())
+ 			return true;
+ 	return false;
+ }
+ bool BFTAG::IsEmpty() const {
+-	for(int i = 0; i < 5; i++)
++	for(int i = 0; i < SKFR_TAG_WORDS; i++)
+ 		if(!ff[i].isZero())
+ 			return false;
+ 	return true;
+@@ -63,7 +63,7 @@ inline unsigned int popCount32(unsigned int v) { // count bits set in this (32-b
+ //
+ int BFTAG::Count() const {
+ 	int c = 0;
+-	for(int i = 0; i < 5; i++)
++	for(int i = 0; i < SKFR_TAG_WORDS; i++)
+ 		c += popcount_128(ff[i].bitmap128.m128i_m128i);
+ 	return c;
+ }
+@@ -74,21 +74,21 @@ int BFTAG::Count() const {
+ //----
+ BFTAG BFTAG::Inverse() const {
+ 	BFTAG w;
+-	for(int i = 0; i < 5; i++)
++	for(int i = 0; i < SKFR_TAG_WORDS; i++)
+ 		w.ff[i].alterOddEven(ff[i]);
+ 	return w;
+ }
+ 
+ BFTAG BFTAG::TrueState() const {
+ 	BFTAG w = (*this);
+-	for(int i = 0; i < 5; i++)
++	for(int i = 0; i < SKFR_TAG_WORDS; i++)
+ 		w.ff[i] &= true128;
+ 	return w;
+ }
+ 
+ BFTAG BFTAG::FalseState() const {
+ 	BFTAG w = (*this);
+-	for(int i = 0; i < 5; i++)
++	for(int i = 0; i < SKFR_TAG_WORDS; i++)
+ 		w.ff[i] &= false128;
+ 	return w;
+ }
+@@ -109,7 +109,7 @@ void BFTAG::String(USHORT * r, USHORT &n) const {
+ 		0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,7,0,
+ 		0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+ 		0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,8};
+-	for(int i = 0; i < 5; i++) {
++	for(int i = 0; i < SKFR_TAG_WORDS; i++) {
+ 		int m = ff[i].nonzeroOctets(); // 16-bit mask of octets having non-zero bits
+ 		int add8 = 0; //0 for lower 8 bits, 8 for higher 8 bits
+ 		while(m) { //exit if no more octets with bits set
+@@ -133,31 +133,38 @@ void BFTAG::String(USHORT * r, USHORT &n) const {
+ void BFTAG::operator &= (const BFTAG &z2) {
+ 	//for(int i = 0; i < BFTAG_size; i++)
+ 	//	f[i] &= z2.f[i];
+-	for(int i = 0; i < 5; i++)
++	for(int i = 0; i < SKFR_TAG_WORDS; i++)
+ 		ff[i] &= z2.ff[i];
+ }
+ void BFTAG::operator |= (const BFTAG &z2) {
+-	for(int i = 0; i < 5; i++)
++	for(int i = 0; i < SKFR_TAG_WORDS; i++)
+ 		ff[i] |= z2.ff[i];
+ }
+ bool BFTAG::operator == (const BFTAG &z2) const {
+-	for(int i = 0; i < 5; i++)
++	for(int i = 0; i < SKFR_TAG_WORDS; i++)
+ 		if(!(ff[i] == z2.ff[i]))
+ 			return false;
+ 	return true;
+ }
+ void BFTAG::operator -= (const BFTAG &z2) {
+-	for(int i = 0; i < 5; i++)
++	for(int i = 0; i < SKFR_TAG_WORDS; i++)
+ 		ff[i] -= z2.ff[i];
+ }
+ 
+ bool BFTAG::substract(const BFTAG &z2) {
+ 	bm128 accum;
++#if !SKFR_WIDE
+ 	ff[0] -= z2.ff[0]; accum = ff[0];
+ 	ff[1] -= z2.ff[1]; accum |= ff[1];
+ 	ff[2] -= z2.ff[2]; accum |= ff[2];
+ 	ff[3] -= z2.ff[3]; accum |= ff[3];
+ 	ff[4] -= z2.ff[4]; accum |= ff[4];
++#else
++	ff[0] -= z2.ff[0]; accum = ff[0];
++	for(int i = 1; i < SKFR_TAG_WORDS; i++) {
++		ff[i] -= z2.ff[i]; accum |= ff[i];
++	}
++#endif
+ 	return !accum.isZero();
+ }
+ 
+@@ -184,7 +191,7 @@ bool BFTAG::substract(const BFTAG &z2) {
+ int BFTAG::SearchChain(const BFTAG *to, USHORT start, USHORT end) {
+ 	int npas = 0; 
+ 	// dimension increased to 400  and npas to 60 for nested mode
+-	USHORT tta[400], ttb[400], *told = tta, *tnew = ttb, itold, itnew;
++	USHORT tta[SKFR_PICK(400, BFTAG_BitSize)], ttb[SKFR_PICK(400, BFTAG_BitSize)], *told = tta, *tnew = ttb, itold, itnew;
+ 	(*this).String(tta, itold);
+ 	while(npas++ < 60) {
+ 		tnew = (told == tta) ? ttb : tta; // new the second table
+@@ -221,7 +228,7 @@ int BFTAG::SearchChain(const BFTAG *to, USHORT start, USHORT end) {
+ */
+ int BFTAG::SearchCycle(const BFTAG *to, USHORT start, const BFTAG &loop) {
+ 	int npas = 0; 
+-	USHORT tta[100], ttb[100], *told = tta, *tnew = ttb, itold, itnew;
++	USHORT tta[SKFR_PICK(100, BFTAG_BitSize)], ttb[SKFR_PICK(100, BFTAG_BitSize)], *told = tta, *tnew = ttb, itold, itnew;
+ 	(*this).String(tta, itold);
+ 	while(npas++ < 30) {
+ 		tnew = (told == tta) ? ttb : tta; // new the second table
+@@ -254,7 +261,7 @@ int BFTAG::SearchCycle(const BFTAG *to, USHORT start, const BFTAG &loop) {
+ */
+ int BFTAG::SearchCycleChain(const BFTAG *to, USHORT i, USHORT relay, const BFTAG &loop) {
+ 	int npas = 0; 
+-	USHORT tta[100], ttb[100], *told = tta, *tnew = ttb, itold, itnew;
++	USHORT tta[SKFR_PICK(100, BFTAG_BitSize)], ttb[SKFR_PICK(100, BFTAG_BitSize)], *told = tta, *tnew = ttb, itold, itnew;
+ 	(*this).String(tta, itold); 
+ 	(*this).Set(i); // lock crossing back i
+ 	while(npas++ < 20) {
+@@ -315,7 +322,13 @@ int BFTAG::TrackBack(const BFTAG *to, USHORT start, USHORT end, USHORT * tt, USH
+ 	if(itt >60) 
+ 		return 1;
+ 	BFTAG steps[60], allsteps; //size set to accepted limit
++#if SKFR_WIDE
++	// Rows are disjoint (one relay reset at most), so 2*BitSize+2 holds them all; tx[60][BFTAG_BitSize] would overflow the stack.
++	USHORT txbuf[2 * BFTAG_BitSize + 2], *tx[60], itx[60], npas = 0;
++	tx[0] = txbuf;
++#else
+ 	USHORT tx[60][200], itx[60], npas = 0;
++#endif
+ 	steps[0].SetAll_0();
+ 	steps[0].Set(start); 
+ 	allsteps = steps[0]; // one way to force weak link at the start in loop mode
+@@ -324,6 +337,9 @@ int BFTAG::TrackBack(const BFTAG *to, USHORT start, USHORT end, USHORT * tt, USH
+ 	while(npas < (itt - 1)) { // must end in step itt
+ 		BFTAG * step = &steps[npas+1];
+ 		step->SetAll_0();
++#if SKFR_WIDE
++		tx[npas + 1] = tx[npas] + itx[npas];
++#endif
+ 		USHORT *ta = tx[npas], *tb = tx[npas + 1],
+ 			ita = itx[npas], itb = 0;
+ 		for(int it = 0; it < ita; it++) {
+diff --git a/src/bitfields.h b/src/bitfields.h
+index 2ca0908..632572b 100644
+--- a/src/bitfields.h
++++ b/src/bitfields.h
+@@ -48,6 +48,21 @@ ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSI
+ #include "skfrtype.h"
+ #include "t_128.h"
+ 
++#ifndef SKFR_MAX_CANDIDATES
++#define SKFR_MAX_CANDIDATES 320
++#endif
++#define SKFR_TAG_WORDS  ((2 * (SKFR_MAX_CANDIDATES) + 127) / 128)
++#define SKFR_TAG_BITS   (128 * SKFR_TAG_WORDS)
++// Slots are TAG_BITS/2, not SKFR_MAX_CANDIDATES: SetAll_1/InitFalseState/InitTrueState set phantom tags up to TAG_BITS, and tag>>1 indexes zp[] and BFCAND.
++#define SKFR_CAND_SLOTS (SKFR_TAG_BITS / 2)
++// +1 word: candtrue.Set(ip) writes bit zpln_lim before the TZPLN check.
++#define SKFR_CAND_WORDS (SKFR_CAND_SLOTS / 128 + 1)
++#define SKFR_WIDE       (SKFR_TAG_WORDS != 5)
++// SKFR_PICK(d, w): d keeps the default build byte-identical, w is the size the wide build needs.
++#define SKFR_PICK(d, w) (SKFR_WIDE ? (w) : (d))
++static_assert(SKFR_CAND_SLOTS <= 1024, "candidate ids must stay below event_vi (1024)");
++static_assert(!SKFR_WIDE || SKFR_CAND_SLOTS >= 325, "dynamic_sets is indexed by base-set id, up to 324");
++
+ namespace skfr {
+ 
+ extern const int BitCount[512];
+@@ -431,7 +446,7 @@ public:
+ //bitfield 320 bits used to store candidates used in a path
+ 
+ class BFCAND {
+-	bm128 ff[3];
++	bm128 ff[SKFR_CAND_WORDS];
+ public:
+ 	BFCAND() {
+ 		SetAll_0();
+@@ -445,9 +460,8 @@ public:
+ 		(*this) = old;
+ 	}
+ 	void SetAll_0() {
+-		ff[0].clear();
+-		ff[1].clear();
+-		ff[2].clear();
++		for(int i = 0; i < SKFR_CAND_WORDS; i++)
++			ff[i].clear();
+ 	} 
+ 	inline int On(int v) const {
+ 		return (ff[v >> 7].isBitSet(v & 127));
+@@ -472,8 +486,8 @@ public:
+    bits 0 and 1 are not used.
+ */
+ 
+-#define BFTAG_size 20
+-#define BFTAG_BitSize 20*32
++#define BFTAG_size (4 * SKFR_TAG_WORDS)
++#define BFTAG_BitSize SKFR_TAG_BITS
+ 
+ /// \brief Bitfield 640 bits used in chains and within a layer in the solver.
+ ///
+@@ -495,7 +509,7 @@ public:
+ /// 2 - All method are not thread safe due to the usage of static member as temporary variables BFTAG::io and
+ /// BFTAG::jo.
+ class BFTAG {
+-	bm128 ff[5];
++	bm128 ff[SKFR_TAG_WORDS];
+ public:
+ 	enum init {
+ 		NoInit = 0,
+@@ -515,11 +529,11 @@ public:
+ 				SetAll_1();
+ 				break;
+ 			case InitFalseState:
+-				for(int i = 0; i < 5; i++)
++				for(int i = 0; i < SKFR_TAG_WORDS; i++)
+ 					ff[i] = false128;
+ 				break;
+ 			case InitTrueState:
+-				for(int i = 0; i < 5; i++)
++				for(int i = 0; i < SKFR_TAG_WORDS; i++)
+ 					ff[i] = true128;
+ 				break;
+ 			default: // InitZero
+diff --git a/src/opsudo.cpp b/src/opsudo.cpp
+index d157c4d..ca04710 100644
+--- a/src/opsudo.cpp
++++ b/src/opsudo.cpp
+@@ -44,6 +44,7 @@ OPSUDO::OPSUDO()  // constructor, overall initial values for command line
+ 		edcycles=1;
+ 		mined=minep=miner=0;maxed=maxep=maxer=200;
+ 		ptime=0;
++		oonecell=0;
+ 		ocopybugs=1;
+     }  
+ 
+diff --git a/src/opsudo.h b/src/opsudo.h
+index 8e98551..a87d847 100644
+--- a/src/opsudo.h
++++ b/src/opsudo.h
+@@ -53,7 +53,8 @@ public:
+ 	 maxer,      //< er limit for -r<     (rate only lowest puzzles
+ 	 miner,      //< er limit for -n(?)> (high rating low ed)
+ 	 edcycles,   //< number of cycles for differed ed
+-         ptime;      //< write time after er ep ed
++         ptime,      //< write time after er ep ed
++	 oonecell;   //< only one cell puzzle: several solutions, rated up to the first assignment
+ 
+ 	BF16 filters; // filters families activated  ed;ep;er;n
+ 
+diff --git a/src/puzzle.cpp b/src/puzzle.cpp
+index 4540291..7ec0ef6 100644
+--- a/src/puzzle.cpp
++++ b/src/puzzle.cpp
+@@ -693,7 +693,7 @@ int PUZZLE::Rating_baseNest(USHORT base, int quick) {
+ 			USHORT ttt[20];
+ 			for(int j = 0; j < nni; j++)
+ 				ttt[j] = chx.tcd[j] << 1;
+-			USHORT p[640],np;
++			USHORT p[BFTAG_BitSize],np;
+ 			ptg->String(p,np);
+ 			for(int jx = 0; jx <np; jx++) {
+ 			    int j=p[jx];
+@@ -1429,7 +1429,8 @@ int PUZZLE::Traite(char * ze) {
+ 	for(int i = 0; i < 81; i++) {
+ 		puz_zero_based[i] = (ze[i] >= '1' && ze[i] <= '9') ? ze[i] - '0' : 0;
+ 	}
+-	if(1 != fsss(puz_zero_based, 2, solutions[0])) { //zero or more than one solutions
++	unsigned long long nsol = fsss(puz_zero_based, 2, solutions[0]);
++	if(options.oonecell ? !nsol : nsol != 1) { //zero solutions, or more than one for a classic puzzle
+         edmax=1;
+ 		return 0;
+ 	}
+@@ -1478,6 +1479,8 @@ int PUZZLE::Traite(char * ze) {
+ 
+ 	//===========================================================
+ 	while (cycle++ < 150) {
++		if(options.oonecell && assigned && !stop_rating)
++			break;
+ 		if(cycle > 148) {
+ 			Seterr(7);
+ 			break;
+@@ -1596,7 +1599,7 @@ int PUZZLE::Traite(char * ze) {
+ 		// at that point, we set to nill dynamic processing done
+ 		// this is done once for all the cycle
+ 		dynamic_form1.SetAll_0();
+-		for(int i=0;i<320;i++){
++		for(int i=0;i<zpln_lim;i++){
+ 			dynamic_form2[i].SetAll_0();
+ 			dynamic_sets[i].SetAll_0();
+ 		}
+@@ -1706,6 +1709,8 @@ int PUZZLE::Traite(char * ze) {
+ }
+ 
+ int PUZZLE::Traite_a() {
++	// uniqueness techniques are invalid when the puzzle has several solutions
++	const int unique = !options.oonecell;
+ 	if (Directs ()) {
+ 		Step(LastCell);
+ 		if(rating_ir > 1)
+@@ -1892,7 +1897,7 @@ int PUZZLE::Traite_a() {
+ 		return 0;
+ 	else if(rating_ir)
+ 		return 1;
+-	if(T81->RIN()) {
++	if(unique && T81->RIN()) {
+ 		SetEr();
+ 		return 1;
+ 	}  //4.5
+@@ -1902,11 +1907,11 @@ int PUZZLE::Traite_a() {
+ 		return 0;
+ 	else if(rating_ir)
+ 		return 1;
+-    if(urt.Traite(46)) {
++    if(unique && urt.Traite(46)) {
+ 		SetEr();
+ 		return 1;
+ 	}  //4.6 t
+-    if(zpaires.UL()) {
++    if(unique && zpaires.UL()) {
+ 		SetEr();
+ 		return 1;
+ 	}    
+@@ -1916,11 +1921,11 @@ int PUZZLE::Traite_a() {
+ 		return 0;
+ 	else if(rating_ir)
+ 		return 1;
+-	 if(urt.Traite(47)) {
++	 if(unique && urt.Traite(47)) {
+ 		 SetEr();
+ 		 return 1;
+ 	 } //4.7
+-	 if(tult.Traite(47)) {
++	 if(unique && tult.Traite(47)) {
+ 		 SetEr();
+ 		 return 1;
+ 	 } 
+@@ -1930,11 +1935,11 @@ int PUZZLE::Traite_a() {
+ 		return 0;
+ 	else if(rating_ir)
+ 		return 1;
+-	if(urt.Traite(48)) {
++	if(unique && urt.Traite(48)) {
+ 		SetEr();
+ 		return 1;
+ 	} //4.7
+-	if(tult.Traite(48)) {
++	if(unique && tult.Traite(48)) {
+ 		SetEr();
+ 		return 1;
+ 	}  //4.8
+@@ -1944,7 +1949,7 @@ int PUZZLE::Traite_a() {
+ 		return 0;
+ 	else if(rating_ir)
+ 		return 1;
+-	if(tult.Traite(49)) {
++	if(unique && tult.Traite(49)) {
+ 		SetEr();
+ 		return 1;
+ 	}  //4.9
+@@ -1954,7 +1959,7 @@ int PUZZLE::Traite_a() {
+ 		return 0;
+ 	else if(rating_ir)
+ 		return 1;
+- 	if(tult.Traite(50)) {
++ 	if(unique && tult.Traite(50)) {
+ 		SetEr();
+ 		return 1;
+ 	}  //4.9
+@@ -1968,7 +1973,7 @@ int PUZZLE::Traite_a() {
+ 		return 0;
+ 	else if(rating_ir)
+ 		return 1;
+-	if(tult.Traite(51)) {
++	if(unique && tult.Traite(51)) {
+ 		SetEr();
+ 		return 1;
+ 	}  //5.1
+@@ -1978,7 +1983,7 @@ int PUZZLE::Traite_a() {
+ 		return 0;
+ 	else if(rating_ir)
+ 		return 1;
+-	if(tult.Traite(52)) {
++	if(unique && tult.Traite(52)) {
+ 		SetEr();
+ 		return 1;
+ 	}  //5.2
+@@ -2002,12 +2007,12 @@ int PUZZLE::Traite_a() {
+ 		return 0;
+ 	else if(rating_ir)
+ 		return 1;
+-    if(zpaires.BUG()) {
++    if(unique && zpaires.BUG()) {
+ 		SetEr();
+ 		return 1;
+ 	}  //5.6 a 5.8
+ 
+-	if(zpaires.aigun) {
++	if(unique && zpaires.aigun) {
+ 		Step((SolvingTechnique)59);
+ 		if(rating_ir > 1)
+ 			return 0;
+@@ -2172,7 +2177,7 @@ void PUZZLE::GoNestedTag(USHORT tag) {
+ 
+ 	//now go forward  till nothing or a contradiction
+ 
+-	for(int i = 0; i < 640; i++)
++	for(int i = 0; i < BFTAG_BitSize; i++)
+ 		tsets[i] = 0;
+ 	npas = 0;
+ 	steps[0] = tt; 
+@@ -2548,7 +2553,7 @@ int PUZZLE::GoNestedCase1(USHORT cand) {
+ 	//now go forward  till nothing or a contradiction
+ 
+ 	to = zcf.hdp_dynamic.t; // we use the table without derivations
+-	for(int i = 0; i < 640; i++)
++	for(int i = 0; i < BFTAG_BitSize; i++)
+ 		tsets[i] = 0;
+ 	npas = 0;
+ 	steps[0].SetAll_0();
+@@ -2767,7 +2772,7 @@ int PUZZLE::GoNestedCase2_3( USHORT tag, USHORT target) {
+ 	//now go forward  till nothing or a contradiction
+ 
+ 	to = zcf.hdp_dynamic.t; // we use the table without derivations
+-	for(int i = 0; i < 640; i++)
++	for(int i = 0; i < BFTAG_BitSize; i++)
+ 		tsets[i] = 0;
+ 	npas = 0;
+ 	steps[0].SetAll_0();
+@@ -3043,6 +3048,7 @@ void PUZZLE::NestedForcing(BFTAG & elims) {
+ 				if(w) bfs |= w->source;// it is a new strong link
+ 			}
+ 			USHORT ii = tstore.AddOne(tt, itt);
++			if(SKFR_WIDE && tcandgo.itt >= SKFR_TCANDGO_TT) { Elimite("TCANDGO"); return; }
+ 			tsets[i ^ 1] =- tcandgo.itt;
+             elims.Set(i ^ 1); 
+ 
+@@ -3083,7 +3089,7 @@ void PUZZLE::NestedMulti(BFTAG & elims) {
+ 		if(aig2 )
+ 			continue;	// if ok second round for action	
+ 
+-		USHORT p[640],np;
++		USHORT p[BFTAG_BitSize],np;
+ 		zt.String(p,np);
+ 		for(int ip = 0; ip < np; ip++) {
+ 			int i=p[ip];
+@@ -3171,6 +3177,7 @@ void PUZZLE::NestedMulti(BFTAG & elims) {
+ 
+ 			if(istored) { //should always be
+ 				USHORT ii = tstore.AddMul(istored, istoref);
++				if(SKFR_WIDE && tcandgo.itt >= SKFR_TCANDGO_TT) { Elimite("TCANDGO"); return; }
+ 				tsets[i] =- tcandgo.itt;
+ 				elims.Set(i); 
+ 				tcandgo.tt[tcandgo.itt++].Add(ii, bfs, tot_count); 
+@@ -3309,7 +3316,7 @@ int PUZZLE::GoBackNested(USHORT tag) {
+ 							 }							 
+ 							 Image(zcf.h.dp);
+ 							 EE.Enl("\n tsets table");
+-							 for(int iw=2;iw<640;iw++) {
++							 for(int iw=2;iw<BFTAG_BitSize;iw++) {
+ 								 if(cumsteps[i].On(iw)) {
+ 									 zpln.ImageTag(iw);
+ 									 EE.E(" tset ");
+@@ -3528,7 +3535,7 @@ int PUZZLE::CaseNestedLevel4Case1( USHORT tag )  {
+ 	}
+ 
+ 	chain4_to = chain4_dpn.t; // we use the table  for nested
+-	for(int i = 0; i < 640; i++)
++	for(int i = 0; i < BFTAG_BitSize; i++)
+ 		chain4_tsets[i] = 0;
+ 	chain4_npas = 0;
+ 	chain4_steps[0]=(*cum);  // start with the known status
+@@ -3573,7 +3580,7 @@ int PUZZLE::CaseNestedLevel4Case1( USHORT tag )  {
+ 		// stop at the first contradiction reached
+ 		BFTAG tw(chain4_allsteps);
+ 		tw &=(tw.Inverse()).TrueState();
+-		USHORT ttw[640],ittw;
++		USHORT ttw[BFTAG_BitSize],ittw;
+ 		tw.String(ttw,ittw);
+ 		if(!ittw)
+ 			continue; 
+@@ -3600,6 +3607,7 @@ int PUZZLE::CaseNestedLevel4Case1( USHORT tag )  {
+ 			   if(length<totlength){ // take it if lower
+ 				   totlength=length;
+ 				   USHORT im = tstore.AddOne(chain4_result,chain4_iresult);
++				   if(SKFR_WIDE && tcandgo.itt >= SKFR_TCANDGO_TT) { Elimite("TCANDGO"); return 0; }
+ 				   tsets[tag ^ 1] =- tcandgo.itt;
+ 				   tcandgo.tt[tcandgo.itt++].Add(im, chain4_bf,length); 
+ 			   }
+@@ -3618,6 +3626,7 @@ int PUZZLE::CaseNestedLevel4Case1( USHORT tag )  {
+ 				totlength=length;
+ 				USHORT  jj=tstore.AddChain(chain4_result,chain4_iresult);
+ 			    USHORT im = tstore.AddMul(ii, jj);
++			    if(SKFR_WIDE && tcandgo.itt >= SKFR_TCANDGO_TT) { Elimite("TCANDGO"); return 0; }
+ 			    tsets[tag^1] =- tcandgo.itt;
+ 				tcandgo.tt[tcandgo.itt++].Add(im, chain4_bf,length); 
+ 			}
+@@ -3653,7 +3662,7 @@ int PUZZLE::CaseNestedLevel4( USHORT tag,USHORT target)  {
+ 	}
+ 
+ 	chain4_to = chain4_dpn.t; // we use the table  for nested
+-	for(int i = 0; i < 640; i++)
++	for(int i = 0; i < BFTAG_BitSize; i++)
+ 		chain4_tsets[i] = 0;
+ 	chain4_npas = 0;
+ 	chain4_steps[0]=(*cum);  // start with the known status
+@@ -3788,7 +3797,7 @@ int PUZZLE::NestedChainGoBack(USHORT tag) {
+         EE.Enl();
+ 	}
+ 
+-	USHORT tret[300],itret=0,itret1=0;
++	USHORT tret[SKFR_PICK(300, 309)],itret=0,itret1=0;
+ 	back4_bfcount.SetAll_0(); 
+ 	back4_bfsource=back4_bfcount;
+ 	back4_bfcount.Set(tag);
+@@ -3965,7 +3974,7 @@ void PUZZLE::NestedForcingLevel4(BFTAG & elims) {
+ 			}
+ 
+ 
+-            USHORT uw[200],iuw;
++            USHORT uw[SKFR_PICK(200, zpln_lim)],iuw;
+ 		    tw.String(uw,iuw);
+ 		     for(int iw=0;iw<iuw;iw++) { // process all targets	
+                USHORT j=uw[iw],length=0;
+@@ -3982,6 +3991,7 @@ void PUZZLE::NestedForcingLevel4(BFTAG & elims) {
+ 			   chain4_bf|=back4_bfsource;
+ 			   jj=tstore.AddChain(chain4_result,chain4_iresult);
+ 			   USHORT im = tstore.AddMul(ii, jj);
++			   if(SKFR_WIDE && tcandgo.itt >= SKFR_TCANDGO_TT) { Elimite("TCANDGO"); return; }
+ 			   tsets[j] =- tcandgo.itt;
+ 				elims.Set(j); 
+ 				tcandgo.tt[tcandgo.itt++].Add(im, chain4_bf,length); 
+@@ -4057,7 +4067,7 @@ void PUZZLE::NestedMultiLevel4(BFTAG & elims) {
+ 			EE.Enl();
+ 		}
+ 
+-		USHORT wtt[400],iwtt;
++		USHORT wtt[SKFR_PICK(400, BFTAG_BitSize / 2)],iwtt;
+ 		zt.String(wtt,iwtt);
+ 		for(int ii=0;ii<iwtt;ii++){
+ 		    int i=wtt[ii];
+@@ -4123,6 +4133,7 @@ void PUZZLE::NestedMultiLevel4(BFTAG & elims) {
+ 
+ 			if(istored) { //should always be unless contr chain seen
+ 				USHORT ii = tstore.AddMul(istored, istoref);
++				if(SKFR_WIDE && tcandgo.itt >= SKFR_TCANDGO_TT) { Elimite("TCANDGO"); return; }
+ 				tsets[i] =- tcandgo.itt;
+ 				elims.Set(i); 
+ 				tcandgo.tt[tcandgo.itt++].Add(ii, chain4_bf, tot_count);  
+diff --git a/src/puzzle.h b/src/puzzle.h
+index 68f91af..902e7c5 100644
+--- a/src/puzzle.h
++++ b/src/puzzle.h
+@@ -681,7 +681,7 @@ public:
+ 	void Clear(PUZZLE &puz, CELL * tw);
+ };
+ 
+-#define zpln_lim 320
++#define zpln_lim SKFR_CAND_SLOTS
+ class CANDIDATES {
+ public:
+ 	PUZZLE * parentpuz;
+@@ -892,7 +892,7 @@ private:
+    limit to size SET_max
+ */
+ 
+-#define setsbuffer_lim 100000
++#define setsbuffer_lim SKFR_PICK(100000, 303000)
+ class SETS_BUFFER   // buffer for candidates + "events"
+ {public: 
+  PUZZLE * parentpuz;
+@@ -937,7 +937,7 @@ public:
+ };
+ 
+ 
+-#define sets_lim 20000
++#define sets_lim SKFR_PICK(20000, 30400)
+ class SETS {
+ public: 
+ 	PUZZLE * parentpuz;
+@@ -1034,7 +1034,10 @@ public:
+ /* table of events 
+ */
+ 
+-#define event_size 10000
++#define event_size SKFR_PICK(10000, 30000)
++// each event adds a set of up to 10 entries; tsets keeps set indexes in a short
++static_assert(!SKFR_WIDE || (sets_lim >= 325 + event_size && sets_lim <= 32767 &&
++	setsbuffer_lim >= 2916 + 10 * event_size), "wide event tables");
+ extern USHORT event_vi;
+ 
+ class TEVENT {
+@@ -1310,9 +1313,10 @@ public:
+ 	}
+ };
+ 
++#define SKFR_TCANDGO_TT 5000
+ class TCANDGO {
+ public:
+-	CANDGOFORWARD tt[5000];
++	CANDGOFORWARD tt[SKFR_TCANDGO_TT];
+ 	CANDGOSTRONG ts[1000];
+ 	USHORT itt, its;
+ 	void Init() {
+@@ -1335,9 +1339,17 @@ public:
+ 	USHORT buf[Size_Store],         
+ 		ise,
+ 		s2[2000], e2[2000], ise2;
+-	int starts[5000], ends[5000],
++	int starts[SKFR_PICK(5000, 5001)], ends[SKFR_PICK(5000, 5001)],  // wide +1: AddChain writes [5000] before its check
+           ibuf;
+ 
++#if SKFR_WIDE
++	// Use reads s2/e2[ise2] before this rating may have written it; zero, as on fresh memory,
++	// keeps a freed default-build PUZZLE from leaking into the wide copy.
++	CHAINSTORE() {
++		memset(s2, 0, sizeof s2);
++		memset(e2, 0, sizeof e2);
++	}
++#endif
+ 	void Init() ;
+ 	USHORT AddChain(USHORT * tch, USHORT n) ;
+ 	USHORT AddOne(USHORT * tch, USHORT n) ;
+@@ -1348,6 +1360,8 @@ public:
+ 
+ 
+ #define pasmax 70
++// npas reaches pasmax+1 in GoNestedCase1 and GoNestedCase2_3
++#define SKFR_PASROWS SKFR_PICK(pasmax, pasmax + 2)
+ 
+ class PUZZLE {
+ public:
+@@ -1424,10 +1438,10 @@ public:
+ 	USHORT npas,
+ 		   nested_print_option;
+ 	int opp,opdiag;  // for debugging purpose
+-	short tsets[640];
+-	USHORT tx[pasmax][700],itx[pasmax];
+-	USHORT tret[500],pasret[500],itret;
+-	BFTAG steps[pasmax],cumsteps[pasmax],allsteps, * to;  
++	short tsets[BFTAG_BitSize];
++	USHORT tx[SKFR_PASROWS][BFTAG_BitSize + 60],itx[SKFR_PASROWS];
++	USHORT tret[SKFR_PICK(500, 300 + 9 + BFTAG_BitSize)],pasret[500],itret;
++	BFTAG steps[SKFR_PASROWS],cumsteps[SKFR_PASROWS],allsteps, * to;  
+ 	BFTAG  *cum  ,* step; 
+ 	USHORT *ta,ita;//,*tb,itb;
+ 	SQUARE_BFTAG dpn,dn, // in nested mode, dynamic set of primary links
+@@ -1443,15 +1457,15 @@ public:
+ 	      // sets index is ""set index"" in ""sets table""
+ 	             
+ 	BFTAG  dynamic_form1,        // form a=> x and  a=>~x		      
+-		   dynamic_form2[320],   // form x=> ~a and  ~x => ~a
+-	       dynamic_sets[320];   // maxi is 384 sets less given 
++		   dynamic_form2[zpln_lim],   // form x=> ~a and  ~x => ~a
++	       dynamic_sets[zpln_lim];   // maxi is 384 sets less given 
+ 
+ 	// set of data for Rating_baseNest looking for results
+ 
+ 	BFTAG rbn_elims1, rbn_elims2, rbn_elims3,rbn_elimt,
+-		  rbn_elimst2[300], rbn_tchte[500],
++		  rbn_elimst2[SKFR_PICK(300, zpln_lim)], rbn_tchte[500],
+ 	      *rbn_d_nested; // final table retained for first phase
+-	USHORT rbn_t2[300], rbn_it2;
++	USHORT rbn_t2[SKFR_PICK(300, zpln_lim)], rbn_it2;
+ 	USHORT rbn_tch[600], rbn_itch;
+ 
+ 
+@@ -1459,8 +1473,8 @@ public:
+ 	// similar to standard but no "plus" set
+ 	// reworked to use one buffer to store sets
+ 
+-	short chain4_tsets[640];
+-	USHORT chain4_buf[640],
++	short chain4_tsets[BFTAG_BitSize];
++	USHORT chain4_buf[BFTAG_BitSize],
+ 		   *chain4_tx[pasmax],  // pointers to chain4_buf
+ 		   chain4_itx[pasmax];
+ 	USHORT chain4_result[500],chain4_iresult;
+diff --git a/src/puzzle_globals.h b/src/puzzle_globals.h
+index af29c5b..7fc3404 100644
+--- a/src/puzzle_globals.h
++++ b/src/puzzle_globals.h
+@@ -3148,7 +3148,7 @@ int SETS::Interdit_Base80() {
+ 		{USHORT tt[2],itt=2; tt[0]=jj; tt[1]=end; 
+ 		parentpuz->zpln.PrintImply(tt,itt);continue;}
+ 		int npasch=wch.SearchChain(parentpuz->zcf.h.dp.t,jj,end);
+-		USHORT tt[50],itt=npasch+2; 
++		USHORT tt[SKFR_PICK(50, 62)],itt=npasch+2; 
+ 		wch.TrackBack(parentpuz->zcf.h.dp.t,jj,end,tt,itt,end);
+ 		parentpuz->zpln.PrintImply(tt,itt);
+ 		}
+@@ -3219,8 +3219,8 @@ int SETS::DeriveDynamicShort(BFTAG & allsteps,SQUARE_BFTAG & dpn,SQUARE_BFTAG &
+ 					tcf2f &= tce[k];
+ 				}
+ 			}
+-			USHORT ind[640], maxInd,    // raw table
+-				   ind2[640],maxInd2=0;   // same not forcing a true
++			USHORT ind[BFTAG_BitSize], maxInd,    // raw table
++				   ind2[BFTAG_BitSize],maxInd2=0;   // same not forcing a true
+ 			tcf2f.String(ind, maxInd);
+ 			for(int j = 0; j < maxInd; j++) { //clear tags forcing a true
+ 				USHORT tgo=ind[j];
+@@ -3324,7 +3324,7 @@ void SETS::DeriveBase(const SET & chx) { // each candidate can be the target
+ 				tcf2f &= tce[k];
+ 			}
+ 		}
+-		USHORT ind[640], maxInd; //v 1 by MD
++		USHORT ind[BFTAG_BitSize], maxInd; //v 1 by MD
+ 		tcf2f.String(ind, maxInd);
+ 		for(int j = 0; j < maxInd; j++) {
+ 			if(parentpuz->zcf.IsStart(ind[j], tcd[i] << 1))
+@@ -3377,7 +3377,7 @@ void SETS::DeriveSet(SET & chx) { // only the "event" can be the target
+ 
+ void SQUARE_BFTAG::Parents(USHORT x) {
+ 	parents.SetAll_0();
+-	USHORT tt[640],itt;
++	USHORT tt[BFTAG_BitSize],itt;
+ 	t[x].String(tt,itt);
+ 	for(int i=0;i< itt;i++)
+ 			parents.Set(tt[i]);
+@@ -3392,7 +3392,7 @@ void SQUARE_BFTAG::Parents(USHORT x) {
+ void SQUARE_BFTAG::ExpandAll(const PUZZLE &puz, SQUARE_BFTAG & from) {
+ 	(*this) = from; // be sure to start with the set of primary data
+ 	BFTAG t1, t2;
+-	USHORT p[640], np;
++	USHORT p[BFTAG_BitSize], np;
+ 	for(int i = 2; i < puz.col; i++) {
+ 		t[i].String(p, np);
+ 		while(np) {
+@@ -3425,7 +3425,7 @@ void SQUARE_BFTAG::ExpandShort(const PUZZLE &puz, SQUARE_BFTAG & from ,int npas)
+  for( int i=2;i< puz.col;i++)
+   {	int n=1,pas=0;
+     while(n && (++pas<npas)) {
+-	  USHORT p[640], np;
++	  USHORT p[BFTAG_BitSize], np;
+       t[i].String(p, np);
+  	   n=0;
+ 	   for(int jx=0;jx<np;jx++){ 
+@@ -3450,7 +3450,7 @@ void SQUARE_BFTAG::AllParents(const PUZZLE &puz, const SQUARE_BFTAG & from) {
+ 	for(int i = 1; i < puz.col; i++)
+ 		t[i] = t[0];
+ 	for(int i = 2; i < puz.col; i++) {
+-		USHORT ind[640], maxInd; //v 1 by MD, 7x speed
++		USHORT ind[BFTAG_BitSize], maxInd; //v 1 by MD, 7x speed
+ 		from.t[i].String(ind, maxInd);
+ 		for(int j = 0; j < maxInd; j++) {
+ 			t[ind[j]].Set(i);
+@@ -3467,8 +3467,8 @@ void SQUARE_BFTAG::AllParents(const PUZZLE &puz, const SQUARE_BFTAG & from) {
+ 	 keep only tags below  minimal total + n (2) 
+    */
+ void SQUARE_BFTAG::Shrink(BFTAG & x,USHORT it)
+-{USHORT tt[300],itt,     // tags in table
+-        ntt[300],min=200,j,lim,ir; 
++{USHORT tt[SKFR_PICK(300, zpln_lim)],itt,     // tags in table
++        ntt[SKFR_PICK(300, zpln_lim)],min=200,j,lim,ir; 
+  x.String(tt,itt);  // put tags in table	
+  for(int i=0;i<itt;i++) {
+     j=tt[i];
+@@ -3494,7 +3494,7 @@ int SQUARE_BFTAG::ExpandToFind(USHORT td,USHORT tf,USHORT lim){
+     if(npas++>lim) return 100; // 
+          // now expand one more step
+ 	int n=0; // to check whether something is done
+-	USHORT p[640], np;
++	USHORT p[BFTAG_BitSize], np;
+     tagw.String(p, np);
+ 	for(int jx=0;jx<np;jx++){
+ 		int j=p[jx];
+diff --git a/src/ratingengine.cpp b/src/ratingengine.cpp
+index 9d82ac6..a1ff2c3 100644
+--- a/src/ratingengine.cpp
++++ b/src/ratingengine.cpp
+@@ -130,6 +130,28 @@ int ratePuzzleC(char *ze, int * er, int * ep, int * ed, int * aig)
+ 	return  rc;
+ }
+ 
++//! Process a puzzle whose solutions all share one non-given cell
++/**
++ * Same as <code>ratePuzzleC</code>, but several solutions are accepted,
++ * uniqueness techniques are skipped and the process stops at the first assignment.
++ * ER EP ED are 0 if no cell was assigned.
++ */
++int ratePuzzleOneCellC(char *ze, int * er, int * ep, int * ed, int * aig)
++{
++	PUZZLE* puz = new PUZZLE();
++	puz->options = Op;
++	puz->options.oonecell = 1;
++	int rc = puz->Traite(ze);
++	if(!puz->assigned || puz->stop_rating)
++		puz->ermax = puz->epmax = puz->edmax = 0;
++	*er = puz->ermax;
++	*ep = puz->epmax;
++	*ed = puz->edmax;
++	*aig = puz->stop_rating;
++	delete puz;
++	return  rc;
++}
++
+ void ratePuzzlesC(int nPuzzles, char *ze, int *er, int *ep, int *ed, int *aig, int *ir) {
+ #ifdef _OPENMP
+ #pragma omp parallel for schedule(dynamic, 1)
+diff --git a/src/ratingengine.h b/src/ratingengine.h
+index 3a796ce..13bcf72 100644
+--- a/src/ratingengine.h
++++ b/src/ratingengine.h
+@@ -31,6 +31,7 @@ namespace skfr {
+ 
+ // rating engine interface (C or C++)
+ int ratePuzzleC(char *ze, int *er, int *ep, int *ed, int *aig);
++int ratePuzzleOneCellC(char *ze, int *er, int *ep, int *ed, int *aig);
+ void setMinMaxC(int mined, int maxed, int minep, int maxep, int miner, int maxer, unsigned int filt);
+ void setParamC (int o1, int delta, int os, int oq, int ot, int oexclude, int edcycles);
+ int setTestModeC (int ot, char *logFileName);
