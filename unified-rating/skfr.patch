@@ -572,7 +572,7 @@ index 4540291..7ec0ef6 100644
  				elims.Set(i); 
  				tcandgo.tt[tcandgo.itt++].Add(ii, chain4_bf, tot_count);  
 diff --git a/src/puzzle.h b/src/puzzle.h
-index 68f91af..902e7c5 100644
+index 68f91af..065dc04 100644
 --- a/src/puzzle.h
 +++ b/src/puzzle.h
 @@ -681,7 +681,7 @@ public:
@@ -626,7 +626,7 @@ index 68f91af..902e7c5 100644
  	CANDGOSTRONG ts[1000];
  	USHORT itt, its;
  	void Init() {
-@@ -1335,9 +1339,17 @@ public:
+@@ -1335,7 +1339,7 @@ public:
  	USHORT buf[Size_Store],         
  		ise,
  		s2[2000], e2[2000], ise2;
@@ -634,18 +634,8 @@ index 68f91af..902e7c5 100644
 +	int starts[SKFR_PICK(5000, 5001)], ends[SKFR_PICK(5000, 5001)],  // wide +1: AddChain writes [5000] before its check
            ibuf;
  
-+#if SKFR_WIDE
-+	// Use reads s2/e2[ise2] before this rating may have written it; zero, as on fresh memory,
-+	// keeps a freed default-build PUZZLE from leaking into the wide copy.
-+	CHAINSTORE() {
-+		memset(s2, 0, sizeof s2);
-+		memset(e2, 0, sizeof e2);
-+	}
-+#endif
  	void Init() ;
- 	USHORT AddChain(USHORT * tch, USHORT n) ;
- 	USHORT AddOne(USHORT * tch, USHORT n) ;
-@@ -1348,6 +1360,8 @@ public:
+@@ -1348,6 +1352,8 @@ public:
  
  
  #define pasmax 70
@@ -654,7 +644,7 @@ index 68f91af..902e7c5 100644
  
  class PUZZLE {
  public:
-@@ -1424,10 +1438,10 @@ public:
+@@ -1424,10 +1430,10 @@ public:
  	USHORT npas,
  		   nested_print_option;
  	int opp,opdiag;  // for debugging purpose
@@ -669,7 +659,7 @@ index 68f91af..902e7c5 100644
  	BFTAG  *cum  ,* step; 
  	USHORT *ta,ita;//,*tb,itb;
  	SQUARE_BFTAG dpn,dn, // in nested mode, dynamic set of primary links
-@@ -1443,15 +1457,15 @@ public:
+@@ -1443,15 +1449,15 @@ public:
  	      // sets index is ""set index"" in ""sets table""
  	             
  	BFTAG  dynamic_form1,        // form a=> x and  a=>~x		      
@@ -689,7 +679,7 @@ index 68f91af..902e7c5 100644
  	USHORT rbn_tch[600], rbn_itch;
  
  
-@@ -1459,8 +1473,8 @@ public:
+@@ -1459,8 +1465,8 @@ public:
  	// similar to standard but no "plus" set
  	// reworked to use one buffer to store sets
  
@@ -701,7 +691,7 @@ index 68f91af..902e7c5 100644
  		   chain4_itx[pasmax];
  	USHORT chain4_result[500],chain4_iresult;
 diff --git a/src/puzzle_globals.h b/src/puzzle_globals.h
-index af29c5b..7fc3404 100644
+index af29c5b..2c81435 100644
 --- a/src/puzzle_globals.h
 +++ b/src/puzzle_globals.h
 @@ -3148,7 +3148,7 @@ int SETS::Interdit_Base80() {
@@ -789,6 +779,15 @@ index af29c5b..7fc3404 100644
      tagw.String(p, np);
  	for(int jx=0;jx<np;jx++){
  		int j=p[jx];
+@@ -3647,7 +3647,7 @@ int CHAINSTORE::Use(CHAINSTORE & store_source,USHORT index){
+ 	if(nchains<=0) // default is count
+ 		return 3; 
+ 	  // loop on stored chains with that count
+-	for(int myindex = 1; myindex <= ise2; myindex++) {
++	for(int myindex = 1; myindex < ise2; myindex++) {
+ 		int myid = s2[myindex], myie = e2[myindex],
+ 			mynchains=myie-myid+1;
+ 		if(mynchains-nchains)
 diff --git a/src/ratingengine.cpp b/src/ratingengine.cpp
 index 9d82ac6..a1ff2c3 100644
 --- a/src/ratingengine.cpp
